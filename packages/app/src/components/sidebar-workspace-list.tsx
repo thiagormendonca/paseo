@@ -68,6 +68,7 @@ import {
 import {
   useSidebarWorkspaceEntry,
   type SidebarProjectEntry,
+  type SidebarSubRepoSection,
   type SidebarWorkspaceEntry,
 } from "@/hooks/use-sidebar-workspaces-list";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
@@ -1246,15 +1247,7 @@ function ProjectHeaderRow({
   const handlePointerEnter = useCallback(() => setIsHovered(true), []);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
 
-  const isMultiGit = project.projectKind === "multi_git" && project.subRepos.length > 0;
-
-  const projectTitleGroupStyle = useMemo(
-    () =>
-      isMultiGit
-        ? [styles.projectTitleGroup, styles.projectTitleGroupColumn]
-        : styles.projectTitleGroup,
-    [isMultiGit],
-  );
+  const projectTitleGroupStyle = styles.projectTitleGroup;
 
   const projectRowStyle = useCallback(
     ({ pressed }: PressableStateCallbackType) => [
@@ -1284,11 +1277,6 @@ function ProjectHeaderRow({
           <Text style={styles.projectTitle} numberOfLines={1}>
             {displayName}
           </Text>
-          {isMultiGit ? (
-            <Text style={styles.projectSubtitle} numberOfLines={1}>
-              {project.subRepos.map((r) => r.split("/").pop() ?? r).join(" · ")}
-            </Text>
-          ) : null}
         </View>
       </View>
       <ProjectRowTrailingActions
@@ -2108,6 +2096,56 @@ function WorkspaceRow({
   );
 }
 
+function SubRepoSectionHeader({ name }: { name: string }) {
+  return (
+    <View style={styles.subRepoSectionHeader}>
+      <Text style={styles.subRepoSectionHeaderText} numberOfLines={1}>
+        {name}
+      </Text>
+    </View>
+  );
+}
+
+function SubRepoSection({
+  section,
+  serverId,
+  selectionEnabled,
+  showShortcutBadges,
+  shortcutIndexByWorkspaceKey,
+  activeWorkspaceSelection,
+  onWorkspacePress,
+  creatingWorkspaceIds,
+}: {
+  section: SidebarSubRepoSection;
+  serverId: string | null;
+  selectionEnabled: boolean;
+  showShortcutBadges: boolean;
+  shortcutIndexByWorkspaceKey: Map<string, number>;
+  activeWorkspaceSelection: ActiveWorkspaceSelection | null;
+  onWorkspacePress?: () => void;
+  creatingWorkspaceIds: ReadonlySet<string>;
+}) {
+  return (
+    <View>
+      <SubRepoSectionHeader name={section.name} />
+      {section.workspaces.map((workspace) => (
+        <MemoWorkspaceRowItem
+          key={workspace.workspaceKey}
+          workspace={workspace}
+          shortcutNumber={shortcutIndexByWorkspaceKey.get(workspace.workspaceKey) ?? null}
+          showShortcutBadge={showShortcutBadges}
+          canCopyBranchName
+          isCreating={creatingWorkspaceIds.has(workspace.workspaceId)}
+          selectionEnabled={selectionEnabled}
+          serverId={serverId}
+          activeWorkspaceSelection={activeWorkspaceSelection}
+          onWorkspacePress={onWorkspacePress}
+        />
+      ))}
+    </View>
+  );
+}
+
 function ProjectBlock({
   project,
   collapsed,
@@ -2327,7 +2365,24 @@ function ProjectBlock({
             dragHandleProps={dragHandleProps}
           />
 
-          {!collapsed ? (
+          {!collapsed && project.projectKind === "multi_git" && project.subRepoSections ? (
+            <View>
+              {project.subRepoSections.map((section) => (
+                <SubRepoSection
+                  key={section.repoPath}
+                  section={section}
+                  serverId={serverId}
+                  selectionEnabled={selectionEnabled}
+                  showShortcutBadges={showShortcutBadges}
+                  shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
+                  activeWorkspaceSelection={activeWorkspaceSelection}
+                  onWorkspacePress={onWorkspacePress}
+                  creatingWorkspaceIds={creatingWorkspaceIds}
+                />
+              ))}
+            </View>
+          ) : null}
+          {!collapsed && !(project.projectKind === "multi_git" && project.subRepoSections) ? (
             <DraggableList
               testID={`sidebar-workspace-list-${project.projectKey}`}
               data={project.workspaces}
@@ -3070,6 +3125,16 @@ const styles = StyleSheet.create((theme) => ({
   },
   kebabButtonHovered: {
     backgroundColor: theme.colors.surface2,
+  },
+  subRepoSectionHeader: {
+    paddingHorizontal: theme.spacing[3],
+    paddingTop: theme.spacing[1],
+    paddingBottom: 2,
+  },
+  subRepoSectionHeaderText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
   },
   statusDotNeedsInput: {
     backgroundColor: theme.colors.palette.amber[500],
