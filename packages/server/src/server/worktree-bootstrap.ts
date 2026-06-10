@@ -29,6 +29,7 @@ import {
   requirePlannedWorkspaceServicePort,
   refreshWorkspaceServicePort,
 } from "./workspace-service-port-registry.js";
+import { formatSystemNotificationPrompt } from "./agent/agent-prompt.js";
 
 export interface WorktreeBootstrapTerminalResult {
   name: string | null;
@@ -46,6 +47,12 @@ export interface RunAsyncWorktreeBootstrapOptions {
   appendTimelineItem: (item: AgentTimelineItem) => Promise<boolean>;
   emitLiveTimelineItem?: (item: AgentTimelineItem) => Promise<boolean>;
   logger?: Logger;
+  /** For multi_git projects: the parent folder that contains paseo.json.
+   *  When set, config is read from this path instead of worktree.worktreePath. */
+  projectRootPath?: string;
+  /** For multi_git workspaces: the list of sub-repo worktrees. When present,
+   *  env vars and a timeline summary item are injected for the workspace. */
+  subRepoWorktrees?: Array<{ name: string; repoPath: string; worktreePath: string }>;
 }
 
 const MAX_WORKTREE_SETUP_COMMAND_OUTPUT_BYTES = 64 * 1024;
@@ -500,7 +507,8 @@ async function runWorktreeTerminalBootstrap(
   options: RunAsyncWorktreeBootstrapOptions,
   runtimeEnv: WorktreeRuntimeEnv,
 ): Promise<void> {
-  const terminalSpecs = getWorktreeTerminalSpecs(options.worktree.worktreePath);
+  const configRoot = options.projectRootPath ?? options.worktree.worktreePath;
+  const terminalSpecs = getWorktreeTerminalSpecs(configRoot);
   if (terminalSpecs.length === 0) {
     return;
   }
@@ -633,10 +641,11 @@ export async function runAsyncWorktreeBootstrap(
     });
 
     setupResults = await runWorktreeSetupCommands({
-      worktreePath: options.worktree.worktreePath,
+      worktreePath: options.projectRootPath ?? options.worktree.worktreePath,
       branchName: options.worktree.branchName,
       cleanupOnFailure: false,
       runtimeEnv,
+      ...(options.projectRootPath ? { configRootPath: options.projectRootPath } : {}),
       onEvent: (event) => {
         applyWorktreeSetupProgressEvent(progressAccumulator, event);
         queueLiveRunningEmit();
@@ -677,6 +686,44 @@ export async function runAsyncWorktreeBootstrap(
   }
 
   await runWorktreeTerminalBootstrap(options, runtimeEnv);
+
+  // multi_git: register per-repo env vars and append a workspace summary.
+  const subRepoWorktrees = options.subRepoWorktrees;
+  if (subRepoWorktrees && subRepoWorktrees.length > 0) {
+    try {
+      const repoEnv: Record<string, string> = {};
+      for (const [index, repo] of subRepoWorktrees.entries()) {
+        repoEnv[`PASEO_REPO_${index}_NAME`] = repo.name;
+        repoEnv[`PASEO_REPO_${index}_PATH`] = repo.repoPath;
+        repoEnv[`PASEO_REPO_${index}_WORKTREE_PATH`] = repo.worktreePath;
+      }
+
+      // Register the env vars for the workspace root CWD so all terminals
+      // spawned from there pick them up.
+      options.terminalManager?.registerCwdEnv({
+        cwd: options.projectRootPath ?? options.worktree.worktreePath,
+        env: repoEnv,
+      });
+
+      // Append a system timeline item so the agent sees the sub-repo paths.
+      const repoLines = subRepoWorktrees
+        .map((repo) => `- ${repo.name}: ${repo.worktreePath}`)
+        .join("\n");
+      const summaryText = `Multi-repo workspace initialized with ${subRepoWorktrees.length} repo${subRepoWorktrees.length === 1 ? "" : "s"}:\n${repoLines}`;
+      await options.appendTimelineItem({
+        type: "user_message",
+        text: formatSystemNotificationPrompt(summaryText),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await options.appendTimelineItem({
+        type: "user_message",
+        text: formatSystemNotificationPrompt(
+          `Failed to initialize multi-repo workspace: ${message}`,
+        ),
+      });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

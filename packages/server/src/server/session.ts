@@ -372,6 +372,8 @@ function buildWorkspaceCheckout(
       worktreeRoot: null,
       isPaseoOwnedWorktree: false,
       mainRepoRoot: null,
+      isMultiGit: undefined,
+      subRepos: undefined,
     };
   }
   if (workspace.kind === "worktree") {
@@ -1600,6 +1602,7 @@ export class Session {
       projectKey: project.projectId,
       projectName: resolveProjectDisplayName(project),
       checkout,
+      subRepos: project.subRepos,
     };
   }
 
@@ -1627,6 +1630,8 @@ export class Session {
           worktreeRoot: null,
           isPaseoOwnedWorktree: false,
           mainRepoRoot: null,
+          isMultiGit: undefined,
+          subRepos: undefined,
         },
       };
     }
@@ -4875,7 +4880,7 @@ export class Session {
   private syncWorkspaceGitObservers(workspaces: Iterable<WorkspaceDescriptorPayload>): void {
     for (const workspace of workspaces) {
       this.syncWorkspaceGitObserver(workspace.workspaceDirectory, {
-        isGit: workspace.projectKind === "git",
+        isGit: workspace.projectKind === "git" || workspace.projectKind === "multi_git",
         workspaceId: workspace.id,
       });
       this.rememberWorkspaceGitDescriptorState(workspace.workspaceDirectory, workspace);
@@ -5716,6 +5721,7 @@ export class Session {
         killTerminalsUnderPath: (rootPath) =>
           this.terminalController.killTerminalsUnderPath(rootPath),
         sessionLogger: this.sessionLogger,
+        workspaceRegistry: this.workspaceRegistry,
       },
       msg,
     );
@@ -6268,6 +6274,16 @@ export class Session {
       diffStat = snapshot.git.diffStat;
     }
 
+    const resolvedKind = resolvedProjectRecord?.kind ?? "directory";
+    let projectKind: WorkspaceDescriptorPayload["projectKind"];
+    if (resolvedKind === "git") {
+      projectKind = "git";
+    } else if (resolvedKind === "multi_git") {
+      projectKind = "multi_git";
+    } else {
+      projectKind = "non_git";
+    }
+
     return {
       id: workspace.workspaceId,
       projectId: workspace.projectId,
@@ -6277,7 +6293,7 @@ export class Session {
       projectCustomName: resolvedProjectRecord?.customName ?? null,
       projectRootPath: resolvedProjectRecord?.rootPath ?? workspace.cwd,
       workspaceDirectory: workspace.cwd,
-      projectKind: (resolvedProjectRecord?.kind ?? "directory") === "git" ? "git" : "non_git",
+      projectKind,
       workspaceKind: workspace.kind,
       name: workspace.displayName,
       archivingAt: null,
@@ -6629,12 +6645,15 @@ export class Session {
       projects.find((project) => project.rootPath === rootPath) ??
       null;
 
+    const subRepos = kind === "multi_git" ? input.membership.subRepos : undefined;
+
     if (!existingProject) {
       return createPersistedProjectRecord({
         projectId: input.membership.projectKey,
         rootPath,
         kind,
         displayName: input.membership.projectName,
+        subRepos,
         createdAt: input.timestamp,
         updatedAt: input.timestamp,
       });
@@ -6644,6 +6663,7 @@ export class Session {
       ...existingProject,
       rootPath,
       kind,
+      ...(subRepos !== undefined ? { subRepos } : {}),
       archivedAt: null,
       updatedAt: input.timestamp,
     };

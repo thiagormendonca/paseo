@@ -1,5 +1,11 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
+
+import { createNameId } from "mnemonic-id";
+
 import type { WorkspaceGitService } from "./workspace-git-service.js";
 import {
+  type PersistedProjectRecord,
   type PersistedWorkspaceRecord,
   type ProjectRegistry,
   type WorkspaceRegistry,
@@ -12,7 +18,7 @@ import {
   type CreateWorktreeCoreDeps,
   type CreateWorktreeCoreInput,
 } from "./worktree-core.js";
-import { validateBranchSlug, type WorktreeConfig } from "../utils/worktree.js";
+import { slugify, validateBranchSlug, type WorktreeConfig } from "../utils/worktree.js";
 import { getCurrentBranch, localBranchExists, renameCurrentBranch } from "../utils/checkout-git.js";
 import {
   markPaseoWorktreeFirstAgentBranchAutoNameAttempted,
@@ -33,6 +39,10 @@ export interface CreatePaseoWorktreeResult {
   workspace: PersistedWorkspaceRecord;
   repoRoot: string;
   created: boolean;
+  /** Root path of the project that owns this worktree.  For multi_git projects
+   *  this is the parent folder that contains paseo.json; for standard git
+   *  projects it equals repoRoot. */
+  projectRootPath: string;
 }
 
 export type CreatePaseoWorktreeFn = (
@@ -58,9 +68,22 @@ export async function createPaseoWorktree(
   input: CreatePaseoWorktreeInput,
   deps: CreatePaseoWorktreeDeps,
 ): Promise<CreatePaseoWorktreeResult> {
+  // Route multi_git projects to dedicated handler
+  if (input.projectId) {
+    const project = await deps.projectRegistry.get(input.projectId);
+    if (
+      project &&
+      !project.archivedAt &&
+      project.kind === "multi_git" &&
+      project.subRepos?.length
+    ) {
+      return createMultiGitWorktree(input, project, deps);
+    }
+  }
+
   const createdWorktree = await createWorktreeCore(input, deps);
   maybeMarkFirstAgentBranchAutoNameEligible({ createdWorktree });
-  const workspace = await upsertWorkspaceForWorktree({
+  const { workspace, projectRootPath } = await upsertWorkspaceForWorktree({
     inputCwd: input.cwd,
     projectId: input.projectId,
     repoRoot: createdWorktree.repoRoot,
@@ -76,6 +99,119 @@ export async function createPaseoWorktree(
     workspace,
     repoRoot: createdWorktree.repoRoot,
     created: createdWorktree.created,
+    projectRootPath,
+  };
+}
+
+async function createMultiGitWorktree(
+  input: CreatePaseoWorktreeInput,
+  project: PersistedProjectRecord,
+  deps: CreatePaseoWorktreeDeps,
+): Promise<CreatePaseoWorktreeResult> {
+  const subRepos = project.subRepos ?? [];
+
+  // Step 1: Pre-resolve the branch slug so we can compute workspaceRoot before
+  // creating any worktrees and place each sub-repo worktree at the correct path
+  // (workspaceRoot/<folderName>) from the very first call.
+  const branchSlug = slugify(input.worktreeSlug ?? createNameId());
+  const workspaceRoot = path.join(
+    path.dirname(project.rootPath),
+    path.basename(project.rootPath) + "-workspaces",
+    branchSlug,
+  );
+  await fs.mkdir(workspaceRoot, { recursive: true });
+
+  // Step 2: Create a worktree for each sub-repo sequentially, using the same
+  // branchSlug across all repos.  We pin worktreeSlug for all repos so they
+  // all land on the same branch name, and pass explicitWorktreePath so each
+  // worktree is placed inside workspaceRoot instead of the default paseo location.
+  const subRepoWorktrees: Array<{ name: string; repoPath: string; worktreePath: string }> = [];
+  let firstCreatedWorktree: Awaited<ReturnType<typeof createWorktreeCore>> | null = null;
+
+  try {
+    for (const subRepoPath of subRepos) {
+      const folderName = path.basename(subRepoPath);
+
+      const createdWorktree = await createWorktreeCore(
+        {
+          ...input,
+          cwd: subRepoPath,
+          worktreeSlug: branchSlug,
+          explicitWorktreePath: path.join(workspaceRoot, folderName),
+        },
+        deps,
+      );
+
+      if (!firstCreatedWorktree) {
+        firstCreatedWorktree = createdWorktree;
+        maybeMarkFirstAgentBranchAutoNameEligible({ createdWorktree });
+      }
+
+      subRepoWorktrees.push({
+        name: folderName,
+        repoPath: subRepoPath,
+        worktreePath: createdWorktree.worktree.worktreePath,
+      });
+
+      deps.github.invalidate({ cwd: createdWorktree.worktree.worktreePath });
+    }
+  } catch (err) {
+    try {
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors, throw original
+    }
+    throw err;
+  }
+
+  if (!firstCreatedWorktree) {
+    throw new Error("No sub-repos produced a worktree");
+  }
+
+  // Step 3: Upsert the project record (refresh timestamps).
+  const now = new Date().toISOString();
+  await deps.projectRegistry.upsert(
+    createPersistedProjectRecord({
+      projectId: project.projectId,
+      rootPath: project.rootPath,
+      kind: project.kind,
+      displayName: project.displayName,
+      customName: project.customName,
+      subRepos: project.subRepos,
+      createdAt: project.createdAt ?? now,
+      updatedAt: now,
+      archivedAt: null,
+    }),
+  );
+
+  // Step 4: Create workspace record with cwd = workspaceRoot and kind = "directory".
+  const normalizedWorkspaceRoot = normalizeWorkspaceId(workspaceRoot);
+  const existingWorkspace = await deps.workspaceRegistry
+    .list()
+    .then((ws) => ws.find((w) => w.cwd === normalizedWorkspaceRoot) ?? null);
+
+  const workspace = createPersistedWorkspaceRecord({
+    workspaceId: normalizedWorkspaceRoot,
+    projectId: project.projectId,
+    cwd: normalizedWorkspaceRoot,
+    kind: "directory",
+    displayName: firstCreatedWorktree.worktree.branchName || normalizedWorkspaceRoot,
+    subRepoWorktrees,
+    createdAt: existingWorkspace?.createdAt ?? now,
+    updatedAt: now,
+    archivedAt: null,
+  });
+
+  await deps.workspaceRegistry.upsert(workspace);
+  const persistedWorkspace = (await deps.workspaceRegistry.get(workspace.workspaceId)) ?? workspace;
+
+  return {
+    worktree: firstCreatedWorktree.worktree,
+    intent: firstCreatedWorktree.intent,
+    workspace: persistedWorkspace,
+    repoRoot: firstCreatedWorktree.repoRoot,
+    created: firstCreatedWorktree.created,
+    projectRootPath: workspaceRoot,
   };
 }
 
@@ -196,7 +332,7 @@ async function upsertWorkspaceForWorktree(options: {
   repoRoot: string;
   worktree: WorktreeConfig;
   deps: Pick<CreatePaseoWorktreeDeps, "projectRegistry" | "workspaceRegistry">;
-}): Promise<PersistedWorkspaceRecord> {
+}): Promise<{ workspace: PersistedWorkspaceRecord; projectRootPath: string }> {
   const normalizedCwd = normalizeWorkspaceId(options.worktree.worktreePath);
   const normalizedInputCwd = normalizeWorkspaceId(options.inputCwd);
   const normalizedRepoRoot = normalizeWorkspaceId(options.repoRoot);
@@ -239,7 +375,9 @@ async function upsertWorkspaceForWorktree(options: {
   });
 
   await options.deps.workspaceRegistry.upsert(workspace);
-  return (await options.deps.workspaceRegistry.get(workspace.workspaceId)) ?? workspace;
+  const persistedWorkspace =
+    (await options.deps.workspaceRegistry.get(workspace.workspaceId)) ?? workspace;
+  return { workspace: persistedWorkspace, projectRootPath: sourceProject.rootPath };
 }
 
 interface SourceProjectForWorktree {

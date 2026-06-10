@@ -2269,10 +2269,14 @@ export const ProjectCheckoutLiteNotGitPayloadSchema = z
     worktreeRoot: z.null().optional(),
     isPaseoOwnedWorktree: z.literal(false),
     mainRepoRoot: z.null(),
+    isMultiGit: z.boolean().optional(),
+    subRepos: z.array(z.string()).optional(),
   })
   .transform((value) => ({
     ...value,
-    worktreeRoot: null,
+    worktreeRoot: null as null,
+    isMultiGit: value.isMultiGit,
+    subRepos: value.subRepos,
   }));
 
 export const ProjectCheckoutLiteGitNonPaseoPayloadSchema = z
@@ -2315,6 +2319,7 @@ export const ProjectPlacementPayloadSchema = z.object({
   projectKey: z.string(),
   projectName: z.string(),
   checkout: ProjectCheckoutLitePayloadSchema,
+  subRepos: z.array(z.string()).optional(),
 });
 
 export const WorkspaceScriptLifecycleSchema = z.enum(["running", "stopped"]);
@@ -2409,7 +2414,7 @@ export const WorkspaceDescriptorPayloadSchema = z
     projectCustomName: z.string().nullable().optional(),
     projectRootPath: z.string(),
     workspaceDirectory: z.string().optional(),
-    projectKind: z.enum(["git", "non_git", "directory"]),
+    projectKind: z.enum(["git", "non_git", "multi_git", "directory"]),
     // COMPAT(workspaces): keep legacy directory workspace kind parseable.
     workspaceKind: z.enum(["directory", "local_checkout", "checkout", "worktree"]),
     name: z.string(),

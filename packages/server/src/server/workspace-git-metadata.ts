@@ -4,7 +4,7 @@ import { slugify } from "../utils/worktree.js";
 import { deriveProjectGroupingKey, deriveProjectGroupingName } from "./workspace-registry-model.js";
 
 export interface WorkspaceGitMetadata {
-  projectKind: "git" | "directory";
+  projectKind: "git" | "directory" | "multi_git";
   projectDisplayName: string;
   workspaceDisplayName: string;
   gitRemote: string | null;
@@ -42,8 +42,23 @@ export function buildWorkspaceGitMetadataFromSnapshot(input: {
   mainRepoRoot: string | null;
   currentBranch: string | null;
   remoteUrl: string | null;
+  isMultiGit?: boolean;
+  subRepos?: string[];
 }): WorkspaceGitMetadata {
   if (!input.isGit) {
+    if (input.isMultiGit) {
+      return {
+        projectKind: "multi_git",
+        projectDisplayName: input.directoryName,
+        workspaceDisplayName: input.directoryName,
+        gitRemote: null,
+        isWorktree: false,
+        projectSlug: deriveProjectSlug(input.cwd),
+        repoRoot: null,
+        currentBranch: null,
+        remoteUrl: null,
+      };
+    }
     return {
       projectKind: "directory",
       projectDisplayName: input.directoryName,

@@ -29,6 +29,7 @@ export {
   type SidebarOrderUpdates,
   type SidebarProjectEntry,
   type SidebarStateBucket,
+  type SidebarSubRepoSection,
   type SidebarWorkspaceEntry,
 } from "./sidebar-workspaces-view-model";
 

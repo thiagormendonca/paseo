@@ -128,6 +128,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
           <WorkspaceStatusIndicator
             bucket={workspace.statusBucket}
             workspaceKind={workspace.workspaceKind}
+            projectKind={workspace.projectKind}
             loading={isLoading}
           />
           <Text style={workspaceBranchTextStyle} numberOfLines={1}>
@@ -176,10 +177,12 @@ function WorkspaceScriptIcon({ kind }: { kind: SidebarWorkspaceScriptIconKind })
 function WorkspaceStatusIndicator({
   bucket,
   workspaceKind,
+  projectKind,
   loading = false,
 }: {
   bucket: SidebarWorkspaceEntry["statusBucket"];
   workspaceKind: SidebarWorkspaceEntry["workspaceKind"];
+  projectKind?: SidebarWorkspaceEntry["projectKind"];
   loading?: boolean;
 }) {
   const shouldShowSyncedLoader = shouldRenderSyncedStatusLoader({ bucket });
@@ -210,7 +213,7 @@ function WorkspaceStatusIndicator({
 
   let KindIcon: typeof ThemedMonitor;
   if (workspaceKind === "local_checkout") KindIcon = ThemedMonitor;
-  else if (workspaceKind === "worktree") KindIcon = ThemedFolderGit2;
+  else if (workspaceKind === "worktree" || projectKind === "multi_git") KindIcon = ThemedFolderGit2;
   else KindIcon = ThemedFolder;
 
   const dotColorStyle = getStatusDotColorStyle(bucket);

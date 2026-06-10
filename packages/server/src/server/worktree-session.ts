@@ -10,7 +10,7 @@ import {
   type WorkspaceSetupSnapshot,
   type WorkspaceDescriptorPayload,
 } from "./messages.js";
-import type { PersistedWorkspaceRecord } from "./workspace-registry.js";
+import type { PersistedWorkspaceRecord, WorkspaceRegistry } from "./workspace-registry.js";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
 import {
   runAsyncWorktreeBootstrap,
@@ -438,6 +438,8 @@ export async function handlePaseoWorktreeArchiveRequest(
     emit: EmitSessionMessage;
     workspaceGitService: Pick<WorkspaceGitService, "getSnapshot" | "listWorktrees">;
     emitWorkspaceUpdatesForWorkspaceIds: (workspaceIds: Iterable<string>) => Promise<void>;
+    /** Optional registry used to look up subRepoWorktrees for multi_git workspace teardown. */
+    workspaceRegistry?: Pick<WorkspaceRegistry, "get">;
   },
   msg: Extract<SessionInboundMessage, { type: "paseo_worktree_archive_request" }>,
 ): Promise<void> {
@@ -610,6 +612,7 @@ export async function createPaseoWorktreeWorkflow(
         shouldBootstrap: createdWorktree.created,
         slug,
         worktreePath: createdWorktree.worktree.worktreePath,
+        projectRootPath: createdWorktree.projectRootPath,
       });
     }
   }, 0);
@@ -629,6 +632,8 @@ export async function createPaseoWorktreeWorkflow(
             emitLiveTimelineItem: (item) =>
               setupContinuation.emitLiveTimelineItem({ agentId, item }),
             logger: setupContinuation.logger,
+            projectRootPath: createdWorktree.projectRootPath,
+            subRepoWorktrees: workspace.subRepoWorktrees,
           });
         },
       },
@@ -665,6 +670,9 @@ export async function runWorktreeSetupInBackground(
     shouldBootstrap: boolean;
     slug: string;
     worktreePath: string;
+    /** For multi_git projects: the parent folder that contains paseo.json.
+     *  When set, config is read from this path instead of worktreePath. */
+    projectRootPath?: string;
   },
 ): Promise<void> {
   let worktree: WorktreeConfig = options.worktree;
@@ -703,7 +711,8 @@ export async function runWorktreeSetupInBackground(
       if (!options.shouldBootstrap) {
         emitSetupProgress("completed", null);
       } else {
-        const setupCommands = getWorktreeSetupCommands(worktree.worktreePath);
+        const configRoot = options.projectRootPath ?? worktree.worktreePath;
+        const setupCommands = getWorktreeSetupCommands(configRoot);
         if (setupCommands.length === 0) {
           setupStarted = true;
           emitSetupProgress("completed", null);
@@ -724,6 +733,7 @@ export async function runWorktreeSetupInBackground(
             cleanupOnFailure: false,
             repoRootPath: options.repoRoot,
             runtimeEnv,
+            ...(options.projectRootPath ? { configRootPath: options.projectRootPath } : {}),
             onEvent: (event) => {
               applyWorktreeSetupProgressEvent(progressAccumulator, event);
               emitSetupProgress("running", null);

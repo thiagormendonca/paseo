@@ -175,6 +175,8 @@ export interface CreateWorktreeOptions {
   runSetup: boolean;
   paseoHome?: string;
   worktreesRoot?: string;
+  /** If provided, use this exact path for the worktree instead of the computed paseo path. */
+  explicitWorktreePath?: string;
 }
 
 interface ResolveExistingWorktreeForSlugOptions {
@@ -590,11 +592,17 @@ export async function runWorktreeSetupCommands(options: {
   branchName: string;
   cleanupOnFailure: boolean;
   repoRootPath?: string;
+  /** For multi_git projects, the parent folder containing all sub-repos. When
+   *  provided, paseo.json is read from this path instead of worktreePath. */
+  configRootPath?: string;
   runtimeEnv?: WorktreeRuntimeEnv;
   onEvent?: (event: WorktreeSetupCommandProgressEvent) => void;
 }): Promise<WorktreeSetupCommandResult[]> {
-  // Read paseo.json from the worktree (it will have the same content as the source repo)
-  const setupCommands = getWorktreeSetupCommands(options.worktreePath);
+  // For multi_git projects paseo.json lives in the project root (parent folder),
+  // not in the individual sub-repo worktree. Fall back to worktreePath for
+  // standard git projects.
+  const configRoot = options.configRootPath ?? options.worktreePath;
+  const setupCommands = getWorktreeSetupCommands(configRoot);
   if (setupCommands.length === 0) {
     return [];
   }
@@ -1174,9 +1182,12 @@ export const createWorktree = async ({
   runSetup,
   paseoHome,
   worktreesRoot,
+  explicitWorktreePath,
 }: CreateWorktreeOptions): Promise<WorktreeConfig> => {
   const sourcePlan = await resolveWorktreeSourcePlan({ cwd, source, desiredSlug: worktreeSlug });
-  let worktreePath = join(await getPaseoWorktreesRoot(cwd, paseoHome, worktreesRoot), worktreeSlug);
+  let worktreePath = explicitWorktreePath
+    ? explicitWorktreePath
+    : join(await getPaseoWorktreesRoot(cwd, paseoHome, worktreesRoot), worktreeSlug);
   mkdirSync(dirname(worktreePath), { recursive: true });
 
   // Also handle worktree path collision

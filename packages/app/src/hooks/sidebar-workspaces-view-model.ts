@@ -31,6 +31,12 @@ export interface SidebarWorkspaceEntry {
   hasRunningScripts: boolean;
 }
 
+export interface SidebarSubRepoSection {
+  name: string;
+  repoPath: string;
+  workspaces: SidebarWorkspaceEntry[];
+}
+
 export interface SidebarProjectEntry {
   projectKey: string;
   projectName: string;
@@ -38,6 +44,8 @@ export interface SidebarProjectEntry {
   iconWorkingDir: string;
   canCreateWorktree: boolean;
   workspaces: SidebarWorkspaceEntry[];
+  subRepos: string[];
+  subRepoSections?: SidebarSubRepoSection[];
 }
 
 function createStructuralWorkspaceEntry(input: {
@@ -80,6 +88,7 @@ export function buildSidebarProjectsFromStructure(input: {
       iconWorkingDir: project.iconWorkingDir,
       workspaceKeys: project.workspaceKeys,
       canCreateWorktree: canCreateWorktreeForProjectKind(project.projectKind),
+      subRepos: project.subRepos ?? [],
     })),
   });
 }
@@ -91,20 +100,35 @@ export function buildSidebarProjectsFromHostProjects(input: {
     return EMPTY_PROJECTS;
   }
 
-  return input.projects.map((project) => ({
-    projectKey: project.projectKey,
-    projectName: project.projectName,
-    projectKind: project.projectKind,
-    iconWorkingDir: project.iconWorkingDir,
-    canCreateWorktree: project.canCreateWorktree,
-    workspaces: project.workspaceKeys.map((workspaceId) =>
+  return input.projects.map((project) => {
+    const workspaces = project.workspaceKeys.map((workspaceId) =>
       createStructuralWorkspaceEntry({
         serverId: project.serverId,
         project,
         workspaceId,
       }),
-    ),
-  }));
+    );
+
+    const subRepoSections: SidebarSubRepoSection[] | undefined =
+      project.projectKind === "multi_git" && project.subRepos.length > 0
+        ? project.subRepos.map((repoPath) => ({
+            name: repoPath.split("/").pop() ?? repoPath,
+            repoPath,
+            workspaces,
+          }))
+        : undefined;
+
+    return {
+      projectKey: project.projectKey,
+      projectName: project.projectName,
+      projectKind: project.projectKind,
+      iconWorkingDir: project.iconWorkingDir,
+      canCreateWorktree: project.canCreateWorktree,
+      subRepos: project.subRepos,
+      workspaces,
+      subRepoSections,
+    };
+  });
 }
 
 export function applyStoredOrdering<T>(input: {

@@ -21,7 +21,11 @@ export type SidebarProjectRowModel =
   | SidebarProjectSectionRowModel;
 
 export function isSidebarProjectFlattened(project: SidebarProjectEntry): boolean {
-  return project.workspaces.length === 1 && project.projectKind !== "git";
+  return (
+    project.workspaces.length === 1 &&
+    project.projectKind !== "git" &&
+    project.projectKind !== "multi_git"
+  );
 }
 
 export function buildSidebarProjectRowModel(input: {
@@ -41,6 +45,8 @@ export function buildSidebarProjectRowModel(input: {
     };
   }
 
+  // multi_git projects always show the header expanded with sub-repo sections;
+  // they are not collapsible. git projects and multi-workspace non-git projects are.
   const collapsible = input.project.projectKind === "git" || input.project.workspaces.length > 1;
 
   let chevron: "expand" | "collapse" | null;

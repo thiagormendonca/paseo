@@ -68,6 +68,7 @@ import {
 import {
   useSidebarWorkspaceEntry,
   type SidebarProjectEntry,
+  type SidebarSubRepoSection,
   type SidebarWorkspaceEntry,
 } from "@/hooks/use-sidebar-workspaces-list";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
@@ -1246,6 +1247,8 @@ function ProjectHeaderRow({
   const handlePointerEnter = useCallback(() => setIsHovered(true), []);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
 
+  const projectTitleGroupStyle = styles.projectTitleGroup;
+
   const projectRowStyle = useCallback(
     ({ pressed }: PressableStateCallbackType) => [
       styles.projectRow,
@@ -1270,7 +1273,7 @@ function ProjectHeaderRow({
           isArchiving={isArchiving}
         />
 
-        <View style={styles.projectTitleGroup}>
+        <View style={projectTitleGroupStyle}>
           <Text style={styles.projectTitle} numberOfLines={1}>
             {displayName}
           </Text>
@@ -2093,6 +2096,56 @@ function WorkspaceRow({
   );
 }
 
+function SubRepoSectionHeader({ name }: { name: string }) {
+  return (
+    <View style={styles.subRepoSectionHeader}>
+      <Text style={styles.subRepoSectionHeaderText} numberOfLines={1}>
+        {name}
+      </Text>
+    </View>
+  );
+}
+
+function SubRepoSection({
+  section,
+  serverId,
+  selectionEnabled,
+  showShortcutBadges,
+  shortcutIndexByWorkspaceKey,
+  activeWorkspaceSelection,
+  onWorkspacePress,
+  creatingWorkspaceIds,
+}: {
+  section: SidebarSubRepoSection;
+  serverId: string | null;
+  selectionEnabled: boolean;
+  showShortcutBadges: boolean;
+  shortcutIndexByWorkspaceKey: Map<string, number>;
+  activeWorkspaceSelection: ActiveWorkspaceSelection | null;
+  onWorkspacePress?: () => void;
+  creatingWorkspaceIds: ReadonlySet<string>;
+}) {
+  return (
+    <View>
+      <SubRepoSectionHeader name={section.name} />
+      {section.workspaces.map((workspace) => (
+        <MemoWorkspaceRowItem
+          key={workspace.workspaceKey}
+          workspace={workspace}
+          shortcutNumber={shortcutIndexByWorkspaceKey.get(workspace.workspaceKey) ?? null}
+          showShortcutBadge={showShortcutBadges}
+          canCopyBranchName
+          isCreating={creatingWorkspaceIds.has(workspace.workspaceId)}
+          selectionEnabled={selectionEnabled}
+          serverId={serverId}
+          activeWorkspaceSelection={activeWorkspaceSelection}
+          onWorkspacePress={onWorkspacePress}
+        />
+      ))}
+    </View>
+  );
+}
+
 function ProjectBlock({
   project,
   collapsed,
@@ -2164,7 +2217,7 @@ function ProjectBlock({
           workspace={item}
           shortcutNumber={shortcutIndexByWorkspaceKey.get(item.workspaceKey) ?? null}
           showShortcutBadge={showShortcutBadges}
-          canCopyBranchName={project.projectKind === "git"}
+          canCopyBranchName={project.projectKind === "git" || project.projectKind === "multi_git"}
           isCreating={creatingWorkspaceIds.has(item.workspaceId)}
           selectionEnabled={selectionEnabled}
           serverId={serverId}
@@ -2312,7 +2365,24 @@ function ProjectBlock({
             dragHandleProps={dragHandleProps}
           />
 
-          {!collapsed ? (
+          {!collapsed && project.projectKind === "multi_git" && project.subRepoSections ? (
+            <View>
+              {project.subRepoSections.map((section) => (
+                <SubRepoSection
+                  key={section.repoPath}
+                  section={section}
+                  serverId={serverId}
+                  selectionEnabled={selectionEnabled}
+                  showShortcutBadges={showShortcutBadges}
+                  shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
+                  activeWorkspaceSelection={activeWorkspaceSelection}
+                  onWorkspacePress={onWorkspacePress}
+                  creatingWorkspaceIds={creatingWorkspaceIds}
+                />
+              ))}
+            </View>
+          ) : null}
+          {!collapsed && !(project.projectKind === "multi_git" && project.subRepoSections) ? (
             <DraggableList
               testID={`sidebar-workspace-list-${project.projectKey}`}
               data={project.workspaces}
@@ -2817,9 +2887,16 @@ const styles = StyleSheet.create((theme) => ({
   projectTitleGroup: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: theme.spacing[1],
     flex: 1,
     minWidth: 0,
+  },
+  projectTitleGroupColumn: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    gap: theme.spacing[0],
   },
   projectIcon: {
     width: "100%",
@@ -2848,6 +2925,12 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
     fontWeight: "400",
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  projectSubtitle: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
     minWidth: 0,
     flexShrink: 1,
   },
@@ -3042,6 +3125,16 @@ const styles = StyleSheet.create((theme) => ({
   },
   kebabButtonHovered: {
     backgroundColor: theme.colors.surface2,
+  },
+  subRepoSectionHeader: {
+    paddingHorizontal: theme.spacing[3],
+    paddingTop: theme.spacing[1],
+    paddingBottom: 2,
+  },
+  subRepoSectionHeaderText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
   },
   statusDotNeedsInput: {
     backgroundColor: theme.colors.palette.amber[500],
