@@ -2179,7 +2179,7 @@ function ProjectBlock({
           workspace={item}
           shortcutNumber={shortcutIndexByWorkspaceKey.get(item.workspaceKey) ?? null}
           showShortcutBadge={showShortcutBadges}
-          canCopyBranchName={project.projectKind === "git"}
+          canCopyBranchName={project.projectKind === "git" || project.projectKind === "multi_git"}
           isCreating={creatingWorkspaceIds.has(item.workspaceId)}
           selectionEnabled={selectionEnabled}
           serverId={serverId}

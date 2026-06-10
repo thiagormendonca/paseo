@@ -21,7 +21,11 @@ export type SidebarProjectRowModel =
   | SidebarProjectSectionRowModel;
 
 export function isSidebarProjectFlattened(project: SidebarProjectEntry): boolean {
-  return project.workspaces.length === 1 && project.projectKind !== "git";
+  return (
+    project.workspaces.length === 1 &&
+    project.projectKind !== "git" &&
+    project.projectKind !== "multi_git"
+  );
 }
 
 export function buildSidebarProjectRowModel(input: {
@@ -41,7 +45,10 @@ export function buildSidebarProjectRowModel(input: {
     };
   }
 
-  const collapsible = input.project.projectKind === "git" || input.project.workspaces.length > 1;
+  const collapsible =
+    input.project.projectKind === "git" ||
+    input.project.projectKind === "multi_git" ||
+    input.project.workspaces.length > 1;
 
   let chevron: "expand" | "collapse" | null;
   if (!collapsible) chevron = null;
